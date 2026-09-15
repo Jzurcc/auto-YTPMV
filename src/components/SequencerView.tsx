@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Square, Download, Sliders, Music } from 'lucide-react';
+import { Play, Square, Download, Sliders, Music, Activity } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import type { NoteSegment, VideoSource } from '../types';
 import { MELODY_PRESETS } from '../core/sequencer/melodyPresets';
@@ -19,6 +19,7 @@ export const SequencerView: React.FC<SequencerViewProps> = ({
 }) => {
   const [selectedPresetId, setSelectedPresetId] = useState<string>('twinkle');
   const [bpm, setBpm] = useState<number>(110);
+  const [timbreCoherence, setTimbreCoherence] = useState<number>(0.75);
   const [customSteps, setCustomSteps] = useState<{ note: string; duration: number }[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState<number>(-1);
@@ -34,8 +35,8 @@ export const SequencerView: React.FC<SequencerViewProps> = ({
   }, [selectedPresetId]);
 
   const resolvedSteps: SequenceStepExecution[] = React.useMemo(() => {
-    return sequenceEngine.resolveSteps(customSteps, segments);
-  }, [customSteps, segments]);
+    return sequenceEngine.resolveSteps(customSteps, segments, timbreCoherence);
+  }, [customSteps, segments, timbreCoherence]);
 
   const handlePlaySequence = async () => {
     if (isPlaying) {
@@ -254,16 +255,44 @@ export const SequencerView: React.FC<SequencerViewProps> = ({
             max="200"
             value={bpm}
             onChange={(e) => setBpm(parseInt(e.target.value, 10))}
-            style={{ width: 120, accentColor: '#38bdf8' }}
+            style={{ width: 90, accentColor: '#38bdf8' }}
           />
           <span style={{
             fontSize: 13,
             fontWeight: 800,
             fontFamily: 'monospace',
             color: '#38bdf8',
-            minWidth: 60,
+            minWidth: 55,
           }}>
             {bpm} BPM
+          </span>
+        </div>
+
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 12 }}
+          title="Timbral Coherence: Balances spectral brightness and attack similarity across consecutive notes"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
+            <Activity size={16} color="#a855f7" />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Timbral Coherence:</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={Math.round(timbreCoherence * 100)}
+            onChange={(e) => setTimbreCoherence(parseInt(e.target.value, 10) / 100)}
+            style={{ width: 100, accentColor: '#a855f7' }}
+          />
+          <span style={{
+            fontSize: 13,
+            fontWeight: 800,
+            fontFamily: 'monospace',
+            color: '#c084fc',
+            minWidth: 45,
+          }}>
+            {Math.round(timbreCoherence * 100)}%
           </span>
         </div>
 
@@ -373,17 +402,35 @@ export const SequencerView: React.FC<SequencerViewProps> = ({
                 </div>
 
                 {seg ? (
-                  <div style={{
-                    fontSize: 10,
-                    color: seg.videoColor,
-                    maxWidth: 74,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    textAlign: 'center',
-                  }}>
-                    {seg.videoName.split('.')[0]}
-                  </div>
+                  <>
+                    <div style={{
+                      fontSize: 10,
+                      color: seg.videoColor,
+                      maxWidth: 74,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      textAlign: 'center',
+                    }}>
+                      {seg.videoName.split('.')[0]}
+                    </div>
+                    {seg.timbre && (
+                      <span style={{
+                        fontSize: 8,
+                        background: 'rgba(168, 85, 247, 0.2)',
+                        color: '#d8b4fe',
+                        padding: '1px 4px',
+                        borderRadius: 3,
+                        whiteSpace: 'nowrap',
+                        border: '1px solid rgba(168, 85, 247, 0.3)',
+                        maxWidth: 74,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}>
+                        {seg.timbre.character}
+                      </span>
+                    )}
+                  </>
                 ) : (
                   <span style={{ fontSize: 9, color: '#f87171' }}>No Clip</span>
                 )}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Play, Plus, Search, ArrowUpDown, Music2 } from 'lucide-react';
+import { Play, Plus, Search, ArrowUpDown, Music2, Activity } from 'lucide-react';
 import type { NoteSegment, VideoSource } from '../types';
 import { NOTE_NAMES, formatTime } from '../core/audio/noteUtils';
 
@@ -25,6 +25,7 @@ export const ClipLibrary: React.FC<ClipLibraryProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVideoId, setSelectedVideoId] = useState<string>('all');
   const [selectedChroma, setSelectedChroma] = useState<string>('all');
+  const [selectedTimbre, setSelectedTimbre] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'pitch' | 'confidence' | 'duration' | 'time'>('confidence');
 
   const filteredSegments = useMemo(() => {
@@ -37,6 +38,9 @@ export const ClipLibrary: React.FC<ClipLibraryProps> = ({
           return false;
         }
         if (selectedVideoId !== 'all' && seg.videoId !== selectedVideoId) {
+          return false;
+        }
+        if (selectedTimbre !== 'all' && seg.timbre?.character !== selectedTimbre) {
           return false;
         }
         if (searchQuery.trim()) {
@@ -140,6 +144,36 @@ export const ClipLibrary: React.FC<ClipLibraryProps> = ({
               ))}
             </select>
           )}
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'rgba(15, 23, 42, 0.8)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 8,
+            padding: '4px 8px',
+          }}>
+            <Activity size={13} color="#a855f7" />
+            <select
+              value={selectedTimbre}
+              onChange={(e) => setSelectedTimbre(e.target.value)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#f8fafc',
+                fontSize: 12,
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="all" style={{ background: '#0f172a' }}>All Timbres</option>
+              <option value="Warm Sustained" style={{ background: '#0f172a' }}>Warm Sustained</option>
+              <option value="Bright Sustained" style={{ background: '#0f172a' }}>Bright Sustained</option>
+              <option value="Percussive Attack" style={{ background: '#0f172a' }}>Percussive Attack</option>
+              <option value="Harmonic Formant" style={{ background: '#0f172a' }}>Harmonic Formant</option>
+            </select>
+          </div>
 
           <div style={{
             display: 'flex',
@@ -323,6 +357,27 @@ export const ClipLibrary: React.FC<ClipLibraryProps> = ({
                     {Math.round(seg.confidence * 100)}% clarity
                   </span>
                 </div>
+
+                {seg.timbre && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 10,
+                    background: 'rgba(168, 85, 247, 0.08)',
+                    border: '1px solid rgba(168, 85, 247, 0.2)',
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#d8b4fe' }}>
+                      <Activity size={11} color="#a855f7" />
+                      <span style={{ fontWeight: 600 }}>{seg.timbre.character}</span>
+                    </div>
+                    <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                      Centroid: {seg.timbre.spectralCentroid}Hz
+                    </span>
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                   <button

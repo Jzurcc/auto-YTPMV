@@ -1,5 +1,6 @@
 import type { NoteSegment, SequencerStep, VideoSource } from '../../types';
 import { noteNameToMidi } from '../audio/noteUtils';
+import { calculateTimbreDistance } from '../audio/timbreAnalyzer';
 import { playbackManager } from '../video/videoPlaybackManager';
 
 export interface SequenceStepExecution {
@@ -15,9 +16,14 @@ export class SequenceEngine {
   private currentStepIndex = -1;
   private stopSignal = false;
 
+  /**
+   * Resolve steps into concrete NoteSegments.
+   * timbreCoherence: 0.0 (Diverse) to 1.0 (Maximum Timbral Coherence)
+   */
   public resolveSteps(
     rawSteps: { note: string; duration: number }[],
-    segments: NoteSegment[]
+    segments: NoteSegment[],
+    timbreCoherence = 0.75
   ): SequenceStepExecution[] {
     const noteMap = new Map<string, NoteSegment[]>();
     for (const seg of segments) {
@@ -25,21 +31,59 @@ export class SequenceEngine {
       noteMap.get(seg.note)!.push(seg);
     }
 
+    let previousChosenSegment: NoteSegment | null = null;
+
     return rawSteps.map((raw, idx) => {
       const targetMidi = noteNameToMidi(raw.note) ?? 60;
       let chosenSegment: NoteSegment | null = null;
       let pitchShiftSemitones = 0;
 
       const exactMatches = noteMap.get(raw.note);
+
       if (exactMatches && exactMatches.length > 0) {
-        chosenSegment = exactMatches[idx % exactMatches.length];
+        if (exactMatches.length === 1 || timbreCoherence === 0) {
+          chosenSegment = exactMatches[idx % exactMatches.length];
+        } else {
+          // Select candidate with the best timbral coherence relative to previous note
+          let bestCandidate = exactMatches[0];
+          let bestScore = Infinity;
+
+          for (const candidate of exactMatches) {
+            let timbreDist = 0.5;
+            if (previousChosenSegment?.timbre && candidate.timbre) {
+              timbreDist = calculateTimbreDistance(previousChosenSegment.timbre, candidate.timbre);
+            }
+
+            // Subtle continuity bonus if from the same video voice
+            const sameSourceBonus = (previousChosenSegment && candidate.videoId === previousChosenSegment.videoId)
+              ? -0.15
+              : 0;
+
+            // Score: lower is better
+            const score = (timbreDist + sameSourceBonus) * timbreCoherence +
+                          (1 - candidate.confidence) * (1 - timbreCoherence * 0.5);
+
+            if (score < bestScore) {
+              bestScore = score;
+              bestCandidate = candidate;
+            }
+          }
+
+          chosenSegment = bestCandidate;
+        }
       } else if (segments.length > 0) {
+        // Find closest segment by pitch and timbre
         let minDiff = Infinity;
         let bestSeg: NoteSegment | null = null;
         for (const seg of segments) {
           const diff = Math.abs(seg.midi - targetMidi);
-          if (diff < minDiff) {
-            minDiff = diff;
+          let tDist = 0.5;
+          if (previousChosenSegment?.timbre && seg.timbre) {
+            tDist = calculateTimbreDistance(previousChosenSegment.timbre, seg.timbre);
+          }
+          const compositeDiff = diff + tDist * timbreCoherence * 2;
+          if (compositeDiff < minDiff) {
+            minDiff = compositeDiff;
             bestSeg = seg;
           }
         }
@@ -47,6 +91,10 @@ export class SequenceEngine {
           chosenSegment = bestSeg;
           pitchShiftSemitones = targetMidi - bestSeg.midi;
         }
+      }
+
+      if (chosenSegment) {
+        previousChosenSegment = chosenSegment;
       }
 
       return {
@@ -97,7 +145,6 @@ export class SequenceEngine {
       await new Promise((r) => setTimeout(r, durationMs));
     }
 
-    playbackManager.stopCurrent();
     this.isPlaying = false;
     this.currentStepIndex = -1;
     onStep(-1);

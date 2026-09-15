@@ -1,6 +1,7 @@
 import type { NoteSegment, VideoSource, PitchAnalysisProgress } from '../../types';
 import { YinPitchDetector } from './pitchDetector';
 import { analyzeFrequency } from './noteUtils';
+import { analyzeTimbre } from './timbreAnalyzer';
 
 export interface FrameResult {
   time: number;
@@ -228,14 +229,14 @@ export class AudioAnalyzer {
       if (isSameNote && isWithinGapTolerance) {
         currentGroup.push(curr);
       } else {
-        const seg = this.createSegmentFromGroup(video, currentGroup, hopDuration);
+        const seg = this.createSegmentFromGroup(video, currentGroup, hopDuration, monoData, sampleRate);
         if (seg) rawSegments.push(seg);
         currentGroup = [curr];
       }
     }
 
     if (currentGroup.length > 0) {
-      const seg = this.createSegmentFromGroup(video, currentGroup, hopDuration);
+      const seg = this.createSegmentFromGroup(video, currentGroup, hopDuration, monoData, sampleRate);
       if (seg) rawSegments.push(seg);
     }
 
@@ -256,7 +257,9 @@ export class AudioAnalyzer {
   private createSegmentFromGroup(
     video: VideoSource,
     group: FrameResult[],
-    hopDuration: number
+    hopDuration: number,
+    monoData: Float32Array,
+    sampleRate: number
   ): NoteSegment | null {
     // Require at least 5 frames (~80ms audio at 16ms hops) to filter out transient clicks/pops
     if (group.length < 5) return null;
@@ -283,6 +286,12 @@ export class AudioAnalyzer {
     const avgConfidence = sumConfidence / group.length;
     const info = analyzeFrequency(avgFreq);
 
+    // Extract raw audio slice for timbral analysis
+    const startSample = Math.max(0, Math.floor(startTime * sampleRate));
+    const endSample = Math.min(monoData.length, Math.ceil(endTime * sampleRate));
+    const segmentPcm = monoData.subarray(startSample, endSample);
+    const timbre = analyzeTimbre(segmentPcm, sampleRate);
+
     return {
       id: `seg_${video.id}_${Math.round(startTime * 1000)}_${info.note}`,
       videoId: video.id,
@@ -300,6 +309,7 @@ export class AudioAnalyzer {
       cents: info.cents,
       confidence: avgConfidence,
       peakRms,
+      timbre,
     };
   }
 
@@ -320,6 +330,7 @@ export class AudioAnalyzer {
           duration: next.endTime - current.startTime,
           confidence: Math.max(current.confidence, next.confidence),
           peakRms: Math.max(current.peakRms, next.peakRms),
+          timbre: current.timbre || next.timbre,
         };
       } else {
         result.push(current);

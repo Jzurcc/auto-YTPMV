@@ -1,3 +1,18 @@
+export type TimbreCharacter = 
+  | 'Warm Sustained' 
+  | 'Bright Sustained' 
+  | 'Percussive Attack' 
+  | 'Harmonic Formant';
+
+export interface TimbreProfile {
+  spectralCentroid: number; // Hz, e.g. 850
+  brightness: number;       // 0.0 (dark/warm) to 1.0 (bright/piercing)
+  attackTimeMs: number;     // e.g. 12ms (percussive) to 110ms (sustained)
+  isPercussive: boolean;
+  character: TimbreCharacter;
+  vector: [number, number, number]; // [brightness, attackNormalized, crestFactorNormalized]
+}
+
 export interface VideoSource {
   id: string;
   name: string;
@@ -28,6 +43,7 @@ export interface NoteSegment {
   cents: number;     // deviation from standard pitch (-50 to +50)
   confidence: number;// 0.0 to 1.0 (YIN aperiodicity metric)
   peakRms: number;   // amplitude volume
+  timbre?: TimbreProfile; // Acoustic timbre profile
 }
 
 export interface PitchAnalysisProgress {
