@@ -1,6 +1,6 @@
 ﻿# auto-YTPMV (PitchClip Studio) 🎵🎬
 
-A 100% client-side React web tool that ingests video compilations, performs real-time audio pitch detection (\$) across video tracks, indexes every musical note time range (\$ to \$), and lets you play your videos like an instrument or sequence them into hilarious music videos!
+A 100% client-side React web tool that ingests video compilations, performs real-time audio pitch detection across video tracks, indexes every musical note time range, and lets you play your videos like an instrument or sequence them into hilarious music videos!
 
 Zero server uploads. 100% private, client-side Web Audio DSP.
 
