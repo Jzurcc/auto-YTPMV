@@ -18,7 +18,9 @@ export class VideoPlaybackManager {
   private activeVideoElement: HTMLVideoElement | null = null;
   private overlapMode: boolean = true; // Default: Polyphonic / Let Ring
 
-  private getAudioContext(): AudioContext {
+  private recordingDestination: MediaStreamAudioDestinationNode | null = null;
+
+  public getAudioContext(): AudioContext {
     if (!this.audioCtx) {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       this.audioCtx = new AudioCtx();
@@ -27,6 +29,15 @@ export class VideoPlaybackManager {
       this.audioCtx.resume();
     }
     return this.audioCtx;
+  }
+
+  public createMediaStreamDestination(): MediaStreamAudioDestinationNode {
+    const ctx = this.getAudioContext();
+    return ctx.createMediaStreamDestination();
+  }
+
+  public setRecordingDestination(dest: MediaStreamAudioDestinationNode | null): void {
+    this.recordingDestination = dest;
   }
 
   public setOverlapMode(enabled: boolean): void {
@@ -39,6 +50,10 @@ export class VideoPlaybackManager {
 
   public registerAudioBuffer(videoId: string, buffer: AudioBuffer): void {
     this.audioBuffers.set(videoId, buffer);
+  }
+
+  public getAudioBuffer(videoId: string): AudioBuffer | undefined {
+    return this.audioBuffers.get(videoId);
   }
 
   public unregisterAudioBuffer(videoId: string): void {
@@ -135,6 +150,9 @@ export class VideoPlaybackManager {
 
         source.connect(gain);
         gain.connect(ctx.destination);
+        if (this.recordingDestination) {
+          gain.connect(this.recordingDestination);
+        }
 
         source.start(now, segment.startTime, playDuration);
         audioHandledByWebAudio = true;

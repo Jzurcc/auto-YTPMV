@@ -1,10 +1,23 @@
 import type { SequenceStepExecution } from '../sequencer/sequenceEngine';
 import type { VideoSource } from '../../types';
 import { playbackManager } from '../video/videoPlaybackManager';
+import fixWebmDuration from 'fix-webm-duration';
 
 export interface ExportProgress {
   progress: number; // 0 to 100
   status: string;
+}
+
+function getSupportedMimeType(): string {
+  const preferred = [
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9,opus',
+    'video/webm',
+  ];
+  for (const t of preferred) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return 'video/webm';
 }
 
 export async function exportSequenceToVideo(
@@ -22,20 +35,26 @@ export async function exportSequenceToVideo(
   const beatDurationMs = (60 / bpm) * 1000;
   const totalDurationMs = executions.reduce((sum, e) => sum + e.step.durationBeats * beatDurationMs, 0);
 
+  // 1. Setup Canvas Stream at steady 30 FPS
   const canvasStream = canvas.captureStream(30);
-  const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  const dest = audioCtx.createMediaStreamDestination();
+
+  // 2. Setup Audio MediaStreamDestination directly on playbackManager's AudioContext
+  // This guarantees all played notes are routed into the recorded stream with 0ms latency
+  const audioDest = playbackManager.createMediaStreamDestination();
+  playbackManager.setRecordingDestination(audioDest);
 
   const combinedStream = new MediaStream([
     ...canvasStream.getVideoTracks(),
-    ...dest.stream.getAudioTracks(),
+    ...audioDest.stream.getAudioTracks(),
   ]);
 
-  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-    ? 'video/webm;codecs=vp8,opus'
-    : 'video/webm';
+  const mimeType = getSupportedMimeType();
+  const recorder = new MediaRecorder(combinedStream, {
+    mimeType,
+    videoBitsPerSecond: 2500000,
+    audioBitsPerSecond: 128000,
+  });
 
-  const recorder = new MediaRecorder(combinedStream, { mimeType });
   const chunks: Blob[] = [];
 
   recorder.ondataavailable = (e) => {
@@ -43,26 +62,47 @@ export async function exportSequenceToVideo(
   };
 
   return new Promise(async (resolve, reject) => {
-    recorder.onstop = () => {
-      audioCtx.close();
-      const blob = new Blob(chunks, { type: mimeType });
-      onProgress({ progress: 100, status: 'Export complete!' });
-      resolve(blob);
+    recorder.onstop = async () => {
+      playbackManager.setRecordingDestination(null);
+
+      try {
+        const rawBlob = new Blob(chunks, { type: mimeType });
+        onProgress({ progress: 99, status: 'Injecting seekable duration metadata...' });
+
+        let finalBlob = rawBlob;
+        if (mimeType.includes('webm')) {
+          try {
+            // Fix missing EBML duration header so players (VLC, Windows Media, QuickTime) can seek and play
+            finalBlob = await fixWebmDuration(rawBlob, Math.round(totalDurationMs), { logger: false });
+          } catch (err) {
+            console.warn('Could not inject WebM duration, fallback to raw blob:', err);
+            finalBlob = rawBlob;
+          }
+        }
+
+        onProgress({ progress: 100, status: 'Export complete!' });
+        resolve(finalBlob);
+      } catch (err) {
+        reject(err);
+      }
     };
 
     recorder.onerror = (e) => {
+      playbackManager.setRecordingDestination(null);
       reject(e);
     };
 
-    recorder.start();
+    recorder.start(100); // Collect data chunks every 100ms
     onProgress({ progress: 5, status: 'Recording video sequence...' });
 
     let elapsedTotalMs = 0;
+    const frameIntervalMs = 1000 / 30; // 30 FPS frame stepping
 
     for (let i = 0; i < executions.length; i++) {
       const item = executions[i];
       const stepDurationMs = item.step.durationBeats * beatDurationMs;
 
+      // Play audio and trigger video seeking via playbackManager
       if (item.segment) {
         playbackManager.playSegment(item.segment, videos, {
           pitchShiftSemitones: item.pitchShiftSemitones,
@@ -71,16 +111,36 @@ export async function exportSequenceToVideo(
 
       const stepStart = performance.now();
       while (performance.now() - stepStart < stepDurationMs) {
-        const currentVideoEl = playbackManager.getActiveVideoElement();
+        let currentVideoEl = playbackManager.getActiveVideoElement();
+        if (!currentVideoEl && item.segment) {
+          currentVideoEl = playbackManager.getVideoElement(item.segment.videoId) || null;
+        }
+
         if (currentVideoEl && currentVideoEl.readyState >= 2) {
-          ctx.drawImage(currentVideoEl, 0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#020617';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          const vw = currentVideoEl.videoWidth || canvas.width;
+          const vh = currentVideoEl.videoHeight || canvas.height;
+          const scale = Math.min(canvas.width / vw, canvas.height / vh);
+          const dw = vw * scale;
+          const dh = vh * scale;
+          const dx = (canvas.width - dw) / 2;
+          const dy = (canvas.height - dh) / 2;
+
+          ctx.drawImage(currentVideoEl, dx, dy, dw, dh);
         } else {
           ctx.fillStyle = '#0f172a';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
         }
 
         drawExportHud(ctx, canvas.width, canvas.height, item, title, i, executions.length);
-        await new Promise((r) => requestAnimationFrame(r));
+
+        // Force frame draw to stream track if supported
+        const videoTrack = canvasStream.getVideoTracks()[0];
+        (videoTrack as any)?.requestFrame?.();
+
+        await new Promise((r) => setTimeout(r, frameIntervalMs));
       }
 
       elapsedTotalMs += stepDurationMs;
@@ -93,11 +153,12 @@ export async function exportSequenceToVideo(
 
     playbackManager.stopCurrent();
     onProgress({ progress: 98, status: 'Finalizing video file...' });
+
     setTimeout(() => {
       if (recorder.state !== 'inactive') {
         recorder.stop();
       }
-    }, 200);
+    }, 250);
   });
 }
 
@@ -110,7 +171,7 @@ function drawExportHud(
   stepIdx: number,
   totalSteps: number
 ) {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
   ctx.fillRect(0, 0, w, 40);
 
   ctx.fillStyle = '#ffffff';
